@@ -1,9 +1,9 @@
 package main
 
 import (
-	"MailClient/conf"
-	"MailClient/email"
-	"MailClient/file"
+	"email2folder/conf"
+	"email2folder/email"
+	"email2folder/file"
 
 	"bytes"
 	"fmt"

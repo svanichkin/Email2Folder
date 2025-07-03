@@ -1,4 +1,4 @@
-module MailClient
+module email2folder
 
 go 1.21.3
 
