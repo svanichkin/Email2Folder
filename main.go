@@ -168,7 +168,7 @@ func processEmails() {
 		// Создание безопасного имени файла
 
 		s, _ := header.Subject()
-		filename := fmt.Sprintf("%s %s.eml", email.ExtractDate(header).Format("2006-01-02 15꞉04"), file.CleanFileName(s))
+		filename := file.TrimFilenameToMaxBytes(fmt.Sprintf("%s %s.eml", email.ExtractDate(header).Format("2006-01-02 15꞉04"), file.CleanFileName(s)), 254)
 
 		// Папка уже создана в findOrCreateFolder
 

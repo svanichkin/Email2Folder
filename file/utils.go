@@ -3,6 +3,7 @@ package file
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/pkg/xattr"
 )
@@ -40,28 +41,10 @@ func CleanFileName(name string) string {
 
 	// Замена двоеточий и очистка
 
-	var cleaned []rune
-	allowed := "!\"#$%&'()*+,-./;<=>?@[\\]^_`{|}~ "
-	for _, r := range name {
-		if r == ':' {
-			cleaned = append(cleaned, '꞉') // U+A789
-		} else if r == '/' {
-			cleaned = append(cleaned, '-')
-		} else if unicode.IsLetter(r) || unicode.IsNumber(r) || strings.ContainsRune(allowed, r) {
-			cleaned = append(cleaned, r)
-		} else {
-			cleaned = append(cleaned, '_')
-		}
-	}
+	name = strings.Replace(name, ":", "꞉", -1)
+	name = strings.Replace(name, "/", "∕", -1)
 
-	// Обрезка длины
-
-	result := string(cleaned)
-	if len(result) > 100 {
-		result = result[:100]
-	}
-
-	return result
+	return name
 
 }
 
@@ -74,5 +57,34 @@ func SetAttributes(path string, attrs map[string]string) error {
 	}
 
 	return nil
+
+}
+
+func TrimFilenameToMaxBytes(s string, maxBytes int) string {
+
+	if maxBytes <= 0 {
+		return ""
+	}
+
+	var b []byte
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+
+		if r == utf8.RuneError && size == 1 {
+			if len(b)+3 > maxBytes { // U+FFFD занимает 3 байта
+				break
+			}
+			b = append(b, '\xEF', '\xBF', '\xBD') // �
+			i += size
+		} else {
+			if len(b)+size > maxBytes {
+				break
+			}
+			b = append(b, s[i:i+size]...)
+			i += size
+		}
+	}
+
+	return string(b)
 
 }
