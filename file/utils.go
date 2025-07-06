@@ -23,10 +23,8 @@ func CleanFolderName(name string) string {
 
 }
 
-func CleanFileName(name string) string {
-
-	// Удаление префиксов
-
+func CleanSubjectPrefix(name string) string {
+	
 	name = strings.TrimSpace(name)
 	for {
 		lower := strings.ToLower(name)
@@ -39,13 +37,18 @@ func CleanFileName(name string) string {
 		}
 	}
 
-	// Замена двоеточий и очистка
+	return name
 
+}
+
+func CleanFileName(name string) string {
+
+	name = CleanSubjectPrefix(name)
 	name = strings.Replace(name, ":", "꞉", -1)
 	name = strings.Replace(name, "/", "∕", -1)
 
 	return name
-
+	
 }
 
 func SetAttributes(path string, attrs map[string]string) error {
@@ -65,7 +68,6 @@ func TrimFilenameToMaxBytes(s string, maxBytes int) string {
 	if maxBytes <= 0 {
 		return ""
 	}
-
 	var b []byte
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])

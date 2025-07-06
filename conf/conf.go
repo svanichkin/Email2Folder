@@ -30,7 +30,6 @@ func Init() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
 		var servers string
 		var passwords string
@@ -47,7 +46,6 @@ func Init() (Config, error) {
 		}
 		fmt.Println("Created configuration file:", configFile)
 	}
-
 	config, err := ReadConfig(configFile)
 	if err != nil {
 		fmt.Println("Error reading configuration file:", err)
@@ -65,7 +63,6 @@ func ReadConfig(configFile string) (Config, error) {
 		return Config{}, err
 	}
 	defer file.Close()
-
 	var config Config
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(&config)
@@ -80,14 +77,13 @@ func ReadConfig(configFile string) (Config, error) {
 func CreateConfig(configFile, servers, passwords string) error {
 
 	config := Config{EmailAdresses: servers, Passwords: passwords}
-
 	file, err := os.Create(configFile)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-
 	encoder := json.NewEncoder(file)
+
 	return encoder.Encode(config)
 
 }

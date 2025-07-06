@@ -18,7 +18,6 @@ func FindEmailAddresses(rootPath string) (map[string]string, error) {
 		if err != nil {
 			return err
 		}
-
 		if info.IsDir() {
 			sshFile := filepath.Join(path, "email")
 			if _, err := os.Stat(sshFile); err == nil {
@@ -44,8 +43,8 @@ func FindEmailAddresses(rootPath string) (map[string]string, error) {
 }
 
 func FindPasswordFiles(rootPath string, devices []string) (map[string]map[string]string, error) {
-	passwordFiles := make(map[string]map[string]string)
 
+	passwordFiles := make(map[string]map[string]string)
 	contains := func(device string, devices []string) bool {
 		for _, d := range devices {
 			if d == device {
@@ -54,7 +53,6 @@ func FindPasswordFiles(rootPath string, devices []string) (map[string]map[string
 		}
 		return false
 	}
-
 	err := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -97,14 +95,9 @@ func FindPasswordFiles(rootPath string, devices []string) (map[string]map[string
 
 func CreateNewFolder(folderPath string, attrs map[string]string) (string, error) {
 
-	// Создаем папку
-
 	if err := os.MkdirAll(folderPath, 0755); err != nil {
 		return "", err
 	}
-
-	// Устанавливаем атрибут
-
 	if err := SetAttributes(folderPath, attrs); err != nil {
 		os.RemoveAll(folderPath)
 		return "", fmt.Errorf("xattr set error: %w", err)
@@ -117,27 +110,17 @@ func CreateNewFolder(folderPath string, attrs map[string]string) (string, error)
 func FindFoldeArttrFrom(folderPath, fromKey string) (string, error) {
 
 	var foundPath string
-
 	err := filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-
-		// Пропускаем файлы и корневую директорию
-
 		if !info.IsDir() || path == folderPath {
 			return nil
 		}
-
-		// Читаем атрибут
-
 		attr, err := xattr.Get(path, "from")
 		if err != nil {
-			return nil // Пропускаем если нет атрибута
+			return nil
 		}
-
-		// Проверяем совпадение
-
 		for _, val := range strings.Split(string(attr), ",") {
 			val = strings.TrimSpace(val)
 			if val == fromKey || strings.HasSuffix(fromKey, val) {
@@ -145,10 +128,8 @@ func FindFoldeArttrFrom(folderPath, fromKey string) (string, error) {
 				return filepath.SkipDir
 			}
 		}
-
 		return nil
 	})
-
 	if foundPath != "" {
 		return foundPath, nil
 	}

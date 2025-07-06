@@ -14,17 +14,11 @@ func InitPop3(serverAddr, username, password string, timeout time.Duration) (*po
 		TLSEnabled:  true,
 		DialTimeout: timeout,
 	})
-
 	c, err := p.NewConn()
 	if err != nil {
-		// log.Println("Connection error:", err)
 		return nil, err
 	}
-
-	// Аутентификация
-
 	if err := c.Auth(username, password); err != nil {
-		// log.Println("Auth error:", err)
 		return nil, err
 	}
 

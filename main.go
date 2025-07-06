@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/emersion/go-message"
 	"github.com/emersion/go-message/mail"
 )
 
@@ -31,33 +30,41 @@ var folder string
 
 func main() {
 
+	// Config parsing
+
 	config, err := conf.Init()
 	if err != nil {
 		log.Fatalf("Failed to initialize config: %v", err)
 	}
+
+	// Find all email addresses
 
 	emailAddresses, err := file.FindEmailAddresses(config.EmailAdresses)
 	if err != nil {
 		log.Fatalf("Failed to initialize email files: %v", err)
 	}
 
+	// Find all passwords for email addresses
+
 	passwordFiles, err := file.FindPasswordFiles(config.Passwords, getKeys(emailAddresses))
 	if err != nil {
 		log.Fatalf("Failed to initialize password files: %v", err)
 	}
 
-	// Пока работаем жестко лишь с одним сервером
+	// Only one server limit
 
-	p := passwordFiles["regru"]
+	var emailAddress string
+	for emailAddress = range emailAddresses {
+		break
+	}
+	p := passwordFiles[emailAddress]
 	keys := make([]string, 0, len(p))
 	for k := range p {
 		keys = append(keys, k)
 	}
-
 	if len(keys) == 0 {
 		log.Fatalf("Failed to initialize username: %v", err)
 	}
-
 	username = keys[0]
 	parts := strings.Split(username, "@")
 	if len(parts) == 2 {
@@ -66,18 +73,19 @@ func main() {
 		log.Fatalf("Failed to initialize server address: %v", err)
 	}
 
-	password = p[username]
+	// Init parameters
 
+	password = p[username]
 	folder = config.Folder
+
+	// Main cycle
 
 	for {
 		now := time.Now()
 		nextRun := now.Truncate(time.Minute).Add(time.Minute).Add(scheduleTime)
 		sleepDuration := nextRun.Sub(now)
-
 		log.Printf("Next run at %s (in %v)", nextRun.Format("15:04:05"), sleepDuration.Round(time.Second))
 		time.Sleep(sleepDuration)
-
 		processEmails()
 	}
 
@@ -88,7 +96,7 @@ func processEmails() {
 	log.Println("Connecting to POP3 server...")
 	startTime := time.Now()
 
-	// Инициализация POP3 клиента
+	// Init POP3 client
 
 	c, err := email.InitPop3(serverAddr, username, password, timeout)
 	if err != nil {
@@ -97,22 +105,20 @@ func processEmails() {
 	}
 	defer c.Quit()
 
-	// Получение статистики
+	// Get statistics
 
 	count, _, err := c.Stat()
 	if err != nil {
 		log.Println("Stat error:", err)
 		return
 	}
-
 	if count == 0 {
 		log.Println("No messages found")
 		return
 	}
-
 	log.Printf("Found %d messages, processing...", count)
 
-	// Получение списка писем
+	// Get emails list
 
 	msgs, err := c.List(0)
 	if err != nil {
@@ -120,27 +126,24 @@ func processEmails() {
 		return
 	}
 
-	// Обработка писем
+	// Work with emails
 
 	for _, msg := range msgs {
 
-		// Проверка времени выполнения
+		// Check timout
 
 		if time.Since(startTime) > timeout {
 			log.Println("Timeout reached, stopping processing")
 			break
 		}
 
-		// Получение письма
+		// Get next mail
 
 		m, err := c.Retr(msg.ID)
 		if err != nil {
 			log.Printf("Retrieve error for message %d: %v", msg.ID, err)
 			continue
 		}
-
-		// Чтение письма
-
 		var buf bytes.Buffer
 		if err := m.WriteTo(&buf); err != nil {
 			log.Printf("Read error for message %d: %v", msg.ID, err)
@@ -148,7 +151,7 @@ func processEmails() {
 		}
 		msgData := buf.Bytes()
 
-		// Парсинг заголовков
+		// Parse headers
 
 		header, err := email.ExtractHeader(msgData)
 		if err != nil {
@@ -156,65 +159,63 @@ func processEmails() {
 			continue
 		}
 
-		// Поиск или создание папки
+		// Find and create folder
 
 		fromAddresses := email.ExtractAddresses(header, "From")
-		folderPath, err := findOrCreateFolder(fromAddresses)
+		folderPath, err := findOrCreateFolderAttrFrom(fromAddresses)
 		if err != nil {
 			log.Printf("Folder error: %v", err)
 			continue
 		}
 
-		// Создание безопасного имени файла
+		// Safity filename
 
 		s, _ := header.Subject()
 		filename := file.TrimFilenameToMaxBytes(fmt.Sprintf("%s %s.eml", email.ExtractDate(header).Format("2006-01-02 15꞉04"), file.CleanFileName(s)), 254)
 
-		// Папка уже создана в findOrCreateFolder
+		// Folder created in findOrCreateFolder
 
 		filePath := filepath.Join(folderPath, filename)
 
-		// Сохранение письма
+		// Create .eml
 
 		if err := os.WriteFile(filePath, msgData, 0644); err != nil {
 			log.Printf("Write file error: %v", err)
 			continue
 		}
 
-		// Установка xattr для файла
+		// Set xattr for .eml
 
-		if err := file.SetAttributes(filePath, initFileAttributes(header, m)); err != nil {
+		attrs := initFileAttributes(header, msgData)
+		if err := file.SetAttributes(filePath, attrs); err != nil {
 			log.Printf("Set attributes error: %v", err)
 		}
 
-		// Удаление письма с сервера
+		// Delete email from server
 
 		if err := c.Dele(msg.ID); err != nil {
 			log.Printf("Delete error: %v", err)
 		}
-
 		log.Printf("Processed message %d from %s", msg.ID, fromAddresses[0])
 	}
 
 }
 
-func findOrCreateFolder(fromAddresses []string) (string, error) {
+func findOrCreateFolderAttrFrom(fromAddresses []string) (string, error) {
 
 	fromKey := strings.Join(fromAddresses, ",")
 
-	// 1. Поиск существующей папки с нужным атрибутом
+	// Find folder wtih xattr from
 
 	if foundPath, err := file.FindFoldeArttrFrom(folder, fromKey); err == nil {
 		return foundPath, nil
 	}
 
-	// 2. Если не найдено — создаем новую папку
+	// If not found - create new folder
 
 	return file.CreateNewFolder(filepath.Join(folder, file.CleanFolderName(fromAddresses[0])), map[string]string{"from": fromKey})
 
 }
-
-// СОЗДАНИЕ НОВОЙ ПАПКИ
 
 func getKeys(m map[string]string) []string {
 
@@ -227,14 +228,16 @@ func getKeys(m map[string]string) []string {
 
 }
 
-func initFileAttributes(header mail.Header, msg *message.Entity) map[string]string {
+func initFileAttributes(header mail.Header, data []byte) map[string]string {
 
 	return map[string]string{
 		"from":        strings.Join(email.ExtractAddresses(header, "From"), ","),
 		"to":          strings.Join(email.ExtractAddresses(header, "To"), ","),
+		"markdown":    email.ExtractText(header, data),
 		"date":        fmt.Sprintf("%d", email.ExtractDate(header).Unix()),
-		"attachments": strconv.FormatBool(email.HasAttachments(msg)),
+		"attachments": strconv.FormatBool(email.HasAttachments(data)),
 		"status":      "unseen",
+		"unsubscribe": strings.Join(email.ExtractUnsubscribe(header), ","),
 	}
 
 }
