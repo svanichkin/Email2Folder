@@ -25,7 +25,9 @@ require (
 	github.com/emersion/go-textwrapper v0.0.0-20200911093747-65d896831594 // indirect
 	github.com/go-shiori/go-readability v0.0.0-20250217085726-9f5bf5ca7612
 	github.com/knadh/go-pop3 v0.3.0
+	github.com/logrusorgru/aurora/v4 v4.0.0
 	github.com/pkg/xattr v0.4.12
+	github.com/sashabaranov/go-openai v1.40.3
 	github.com/svanichkin/TelegramHTML v1.1.0
 	golang.org/x/text v0.25.0 // indirect
 )

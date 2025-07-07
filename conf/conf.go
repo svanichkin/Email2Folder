@@ -8,19 +8,21 @@ import (
 )
 
 type Config struct {
-	EmailAdresses string `json:"emailAdresses"`
-	Passwords     string `json:"passwords"`
-	Folder        string `json:"folder"`
+	Addresses   string `json:"addresses"`
+	Passwords   string `json:"passwords"`
+	Folder      string `json:"folder"`
+	OpenAIToken string `json:"openai"`
 }
 
 func GetConfigFilePath() (string, error) {
 
-	configDir := "/etc/email2folder"
-	if err := os.MkdirAll(configDir, os.ModePerm); err != nil {
+	exePath, err := os.Executable()
+	if err != nil {
 		return "", err
 	}
+	exeDir := filepath.Dir(exePath)
 
-	return filepath.Join(configDir, "config.json"), nil
+	return filepath.Join(exeDir, "config.json"), nil
 
 }
 
@@ -76,7 +78,7 @@ func ReadConfig(configFile string) (Config, error) {
 
 func CreateConfig(configFile, servers, passwords string) error {
 
-	config := Config{EmailAdresses: servers, Passwords: passwords}
+	config := Config{Addresses: servers, Passwords: passwords}
 	file, err := os.Create(configFile)
 	if err != nil {
 		return err

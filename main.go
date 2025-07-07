@@ -4,6 +4,8 @@ import (
 	"email2folder/conf"
 	"email2folder/email"
 	"email2folder/file"
+	"email2folder/openai"
+	"os/exec"
 
 	"bytes"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-message/mail"
+	au "github.com/logrusorgru/aurora/v4"
 )
 
 const (
@@ -39,7 +42,7 @@ func main() {
 
 	// Find all email addresses
 
-	emailAddresses, err := file.FindEmailAddresses(config.EmailAdresses)
+	emailAddresses, err := file.FindEmailAddresses(config.Addresses)
 	if err != nil {
 		log.Fatalf("Failed to initialize email files: %v", err)
 	}
@@ -78,6 +81,24 @@ func main() {
 	password = p[username]
 	folder = config.Folder
 
+	// Init OpenAI
+
+	var ai *openai.OpenAIClient
+	ai, err = openai.NewOpenAIClient(config.OpenAIToken)
+	if err != nil {
+		log.Fatalf(au.Gray(12, "[INIT]").String()+" "+au.Yellow(au.Bold("Warning: Failed to initialize OpenAI client: %v. OpenAI features will be disabled.")).String(), err)
+	} else if ai == nil {
+		log.Fatalf(au.Gray(12, "[INIT]").String() + " " + au.Yellow("OpenAI token not provided or empty. OpenAI features will be disabled.").String())
+	} else {
+		log.Println(au.Gray(12, "[INIT]").String() + " " + au.Green("OpenAI client initialized successfully.").String())
+	}
+
+	// Check if service updated with last modify time
+
+	exePath, _ := os.Executable()
+	info, _ := os.Stat(exePath)
+	lastModTime := info.ModTime()
+
 	// Main cycle
 
 	for {
@@ -86,12 +107,21 @@ func main() {
 		sleepDuration := nextRun.Sub(now)
 		log.Printf("Next run at %s (in %v)", nextRun.Format("15:04:05"), sleepDuration.Round(time.Second))
 		time.Sleep(sleepDuration)
-		processEmails()
+		processEmails(ai)
+		info, err := os.Stat(exePath)
+		if err != nil {
+			continue
+		}
+		if info.ModTime() != lastModTime {
+			fmt.Println("Binary updated, stop service...")
+			exec.Command(exePath).Start()
+			os.Exit(0)
+		}
 	}
 
 }
 
-func processEmails() {
+func processEmails(ai *openai.OpenAIClient) {
 
 	log.Println("Connecting to POP3 server...")
 	startTime := time.Now()
@@ -159,6 +189,28 @@ func processEmails() {
 			continue
 		}
 
+		// Get attributes
+
+		attrs, err := initFileAttributes(header, msgData)
+		if err != nil {
+			log.Printf("Attributes error: %v", err)
+			continue
+		}
+
+		// Openai attributwes
+
+		res, err := ai.GenerateTextFromEmail(attrs["markdown"])
+		if err != nil {
+			log.Printf("Openai attributes error: %v", err)
+			continue
+		}
+		attrs["type"] = string(res.Type)
+		attrs["summary"] = string(res.Summary)
+		if len(attrs["unsubscribe"]) == 0 {
+			attrs["unsubscribe"] = string(res.Unsubscribe)
+		}
+		attrs["tags"] = string(res.Tags)
+
 		// Find and create folder
 
 		fromAddresses := email.ExtractAddresses(header, "From")
@@ -186,7 +238,6 @@ func processEmails() {
 
 		// Set xattr for .eml
 
-		attrs := initFileAttributes(header, msgData)
 		if err := file.SetAttributes(filePath, attrs); err != nil {
 			log.Printf("Set attributes error: %v", err)
 		}
@@ -228,16 +279,21 @@ func getKeys(m map[string]string) []string {
 
 }
 
-func initFileAttributes(header mail.Header, data []byte) map[string]string {
+func initFileAttributes(header mail.Header, data []byte) (map[string]string, error) {
+
+	md, err := email.ExtractText(header, data)
+	if err != nil {
+		return nil, err
+	}
 
 	return map[string]string{
 		"from":        strings.Join(email.ExtractAddresses(header, "From"), ","),
 		"to":          strings.Join(email.ExtractAddresses(header, "To"), ","),
-		"markdown":    email.ExtractText(header, data),
+		"markdown":    md,
 		"date":        fmt.Sprintf("%d", email.ExtractDate(header).Unix()),
 		"attachments": strconv.FormatBool(email.HasAttachments(data)),
 		"status":      "unseen",
 		"unsubscribe": strings.Join(email.ExtractUnsubscribe(header), ","),
-	}
+	}, nil
 
 }

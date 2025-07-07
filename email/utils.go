@@ -78,14 +78,14 @@ func ExtractDate(header mail.Header) time.Time {
 
 }
 
-func ExtractText(header mail.Header, data []byte) string {
+func ExtractText(header mail.Header, data []byte) (string, error) {
 
 	subj, _ := header.Subject()
 	subj = "<b>" + cleanSubjectPrefix(subj) + "</b>\n\n"
 	var html, plain strings.Builder
 	msg, err := message.Read(bytes.NewReader(data))
 	if err != nil {
-		return ""
+		return "", err
 	}
 	if mr := msg.MultipartReader(); mr != nil {
 		for {
@@ -115,10 +115,10 @@ func ExtractText(header mail.Header, data []byte) string {
 	if html.Len() > 0 {
 		h := htmlToMarkdown(subj + telehtml.CleanTelegramHTML(html.String()))
 		fmt.Print(h)
-		return h
+		return h, nil
 	}
 
-	return plain.String()
+	return plain.String(), nil
 
 }
 
