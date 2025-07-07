@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-message/mail"
+	"github.com/jhillyerd/enmime"
 	au "github.com/logrusorgru/aurora/v4"
 )
 
@@ -223,7 +224,8 @@ func processEmails(ai *openai.OpenAIClient) {
 		// Safity filename
 
 		s, _ := header.Subject()
-		filename := file.TrimFilenameToMaxBytes(fmt.Sprintf("%s %s.eml", email.ExtractDate(header).Format("2006-01-02 15꞉04"), file.CleanFileName(s)), 254)
+		d := email.ExtractDate(header).Format("2006-01-02 15꞉04")
+		filename := file.TrimFilenameToMaxBytes(fmt.Sprintf("%s %s.eml", d, file.CleanFileName(s)), 254)
 
 		// Folder created in findOrCreateFolder
 
@@ -240,6 +242,18 @@ func processEmails(ai *openai.OpenAIClient) {
 
 		if err := file.SetAttributes(filePath, attrs); err != nil {
 			log.Printf("Set attributes error: %v", err)
+		}
+
+		env, err := enmime.ReadEnvelope(bytes.NewReader(msgData))
+		if err != nil {
+			log.Printf("Parse MIME error: %v", err)
+		} else {
+			for _, att := range env.Attachments {
+				attPath := filepath.Join(folderPath, file.TrimFilenameToMaxBytes(d+" "+att.FileName, 254))
+				if err := os.WriteFile(attPath, att.Content, 0644); err != nil {
+					log.Printf("Save attachment error: %v", err)
+				}
+			}
 		}
 
 		// Delete email from server
