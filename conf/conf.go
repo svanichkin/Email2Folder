@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type Config struct {
-	Addresses   string `json:"addresses"`
-	Passwords   string `json:"passwords"`
-	Folder      string `json:"folder"`
-	OpenAIToken string `json:"openai"`
+	Addresses       string        `json:"addresses"`
+	Passwords       string        `json:"passwords"`
+	Folder          string        `json:"folder"`
+	OpenAIToken     string        `json:"openai"`
+	StartTimeSecond time.Duration `json:"startTimeSecond"`
 }
 
 func GetConfigFilePath() (string, error) {

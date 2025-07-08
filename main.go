@@ -23,14 +23,15 @@ import (
 )
 
 const (
-	timeout      = 10 * time.Second
-	scheduleTime = 0 * time.Second
+	timeout = 10 * time.Second
 )
 
 var serverAddr string
 var username string
 var password string
 var folder string
+
+var scheduleTime time.Duration
 
 func main() {
 
@@ -40,6 +41,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize config: %v", err)
 	}
+
+	// Start cycle every config.StartTimeSecond one time in minute
+
+	scheduleTime = config.StartTimeSecond * time.Second
 
 	// Find all email addresses
 
