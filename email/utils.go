@@ -130,17 +130,20 @@ func ExtractText(header mail.Header, data []byte) (string, error) {
 				if err == io.EOF {
 					break
 				} else if err != nil {
-					break
+					if !strings.Contains(err.Error(), "unknown charset") {
+						break
+					}
 				}
-				processPart(p) // рекурсия
+				processPart(p)
 			}
 		} else {
 			b, _ := io.ReadAll(entity.Body)
 			ct := entity.Header.Get("Content-Type")
 			mt, _, _ := mime.ParseMediaType(ct)
-			if mt == "text/html" {
+			switch mt {
+			case "text/html":
 				html.Write(b)
-			} else if mt == "text/plain" {
+			case "text/plain":
 				plain.Write(b)
 			}
 		}
