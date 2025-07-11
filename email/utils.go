@@ -2,6 +2,7 @@ package email
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -58,14 +59,46 @@ func HasAttachments(data []byte) bool {
 
 func ExtractAddresses(header mail.Header, field string) []string {
 
-	addrs, _ := header.AddressList(field)
-	result := make([]string, 0, len(addrs))
-	for _, addr := range addrs {
-		result = append(result, addr.Address)
+	val := header.Get(field)
+	if val == "" {
+		return nil
 	}
+	var result []string
+	addrs, err := mail.ParseAddressList(val)
+	if err == nil && len(addrs) > 0 {
+		result = make([]string, 0, len(addrs))
+		for _, addr := range addrs {
+			result = append(result, addr.Address)
+		}
+	} else {
+		result = extractEmailsFromString(val)
+	}
+	result = removeDoubles(result)
 
 	return result
+}
 
+func removeDoubles(input []string) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0, len(input))
+	for _, s := range input {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func extractEmailsFromString(s string) []string {
+	parts := strings.Fields(s)
+	var res []string
+	for _, part := range parts {
+		if strings.Contains(part, "@") {
+			res = append(res, strings.Trim(part, "<>"))
+		}
+	}
+	return res
 }
 
 func ExtractDate(header mail.Header) time.Time {
@@ -83,43 +116,48 @@ func ExtractText(header mail.Header, data []byte) (string, error) {
 	subj, _ := header.Subject()
 	subj = "<b>" + cleanSubjectPrefix(subj) + "</b>\n\n"
 	var html, plain strings.Builder
+
 	msg, err := message.Read(bytes.NewReader(data))
 	if err != nil {
 		return "", err
 	}
-	if mr := msg.MultipartReader(); mr != nil {
-		for {
-			p, err := mr.NextPart()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				break
+
+	var processPart func(*message.Entity)
+	processPart = func(entity *message.Entity) {
+		if mr := entity.MultipartReader(); mr != nil {
+			for {
+				p, err := mr.NextPart()
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					break
+				}
+				processPart(p) // рекурсия
 			}
-			ct := p.Header.Get("Content-Type")
-			b, _ := io.ReadAll(p.Body)
-			if strings.HasPrefix(ct, "text/html") {
+		} else {
+			b, _ := io.ReadAll(entity.Body)
+			ct := entity.Header.Get("Content-Type")
+			mt, _, _ := mime.ParseMediaType(ct)
+			if mt == "text/html" {
 				html.Write(b)
-			} else if strings.HasPrefix(ct, "text/plain") {
+			} else if mt == "text/plain" {
 				plain.Write(b)
 			}
 		}
-	} else {
-		b, _ := io.ReadAll(msg.Body)
-		ct := msg.Header.Get("Content-Type")
-		if strings.HasPrefix(ct, "text/html") {
-			html.Write(b)
-		} else {
-			plain.Write(b)
-		}
 	}
+
+	processPart(msg)
+
 	if html.Len() > 0 {
 		h := htmlToMarkdown(subj + telehtml.CleanTelegramHTML(html.String()))
-		fmt.Print(h)
 		return h, nil
 	}
 
-	return plain.String(), nil
+	if plain.Len() > 0 {
+		return plain.String(), nil
+	}
 
+	return "", errors.New("no text found in message")
 }
 
 func ExtractUnsubscribe(header mail.Header) []string {

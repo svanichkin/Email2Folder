@@ -282,8 +282,11 @@ func findOrCreateFolderAttrFrom(fromAddresses []string) (string, error) {
 	}
 
 	// If not found - create new folder
+	from := map[string]string{"from": fromKey}
+	folderName := file.CleanFolderName(fromAddresses[0])
+	fullPath := filepath.Join(folder, folderName)
 
-	return file.CreateNewFolder(filepath.Join(folder, file.CleanFolderName(fromAddresses[0])), map[string]string{"from": fromKey})
+	return file.CreateNewFolder(fullPath, from)
 
 }
 
