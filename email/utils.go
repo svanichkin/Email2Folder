@@ -209,3 +209,19 @@ func cleanSubjectPrefix(name string) string {
 	return name
 
 }
+
+// not working
+func NormalizeBodyLineEndings(data []byte) []byte {
+
+	sep := []byte("\r\n\r\n")
+	idx := bytes.Index(data, sep)
+	if idx < 0 {
+		return data
+	}
+	headerPart := data[:idx+len(sep)]
+	bodyPart := data[idx+len(sep):]
+	bodyFixed := bytes.ReplaceAll(bodyPart, []byte("\r\n"), []byte("\n"))
+
+	return append(headerPart, bodyFixed...)
+
+}
