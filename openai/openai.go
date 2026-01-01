@@ -43,7 +43,7 @@ func NewOpenAIClient(token string) (*OpenAIClient, error) {
 {
   "type": "spam|phishing|notification|code|human|unknown",
   "language": "Определи язык на котором письмо написано",
-  "summary": "Краткое описание письма на языке language",
+  "summary": "Краткое описание письма на русском языке",
   "tags": "Напиши хештеги",
   "unsubscribe": "URL для отписки, если есть" // поле необязательное
 }
