@@ -12,7 +12,7 @@ type Config struct {
 	Addresses       string        `json:"addresses"`
 	Passwords       string        `json:"passwords"`
 	Folder          string        `json:"folder"`
-	OpenAIToken     string        `json:"openai"`
+	RemoteAIToken     string        `json:"remoteai"`
 	StartTimeSecond time.Duration `json:"startTimeSecond"`
 }
 

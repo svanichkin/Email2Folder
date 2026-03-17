@@ -4,7 +4,7 @@ import (
 	"email2folder/conf"
 	"email2folder/email"
 	"email2folder/file"
-	"email2folder/openai"
+	"email2folder/remoteai"
 	"os/exec"
 
 	"bytes"
@@ -87,16 +87,16 @@ func main() {
 	password = p[username]
 	folder = config.Folder
 
-	// Init OpenAI
+	// Init RemoteAI
 
-	var ai *openai.OpenAIClient
-	ai, err = openai.NewOpenAIClient(config.OpenAIToken)
+	var ai *remoteai.RemoteAIClient
+	ai, err = remoteai.NewRemoteAIClient(config.RemoteAIToken)
 	if err != nil {
-		log.Fatalf(au.Gray(12, "[INIT]").String()+" "+au.Yellow(au.Bold("Warning: Failed to initialize OpenAI client: %v. OpenAI features will be disabled.")).String(), err)
+		log.Fatalf(au.Gray(12, "[INIT]").String()+" "+au.Yellow(au.Bold("Warning: Failed to initialize RemoteAI client: %v. RemoteAI features will be disabled.")).String(), err)
 	} else if ai == nil {
-		log.Fatalf(au.Gray(12, "[INIT]").String() + " " + au.Yellow("OpenAI token not provided or empty. OpenAI features will be disabled.").String())
+		log.Fatalf(au.Gray(12, "[INIT]").String() + " " + au.Yellow("RemoteAI token not provided or empty. RemoteAI features will be disabled.").String())
 	} else {
-		log.Println(au.Gray(12, "[INIT]").String() + " " + au.Green("OpenAI client initialized successfully.").String())
+		log.Println(au.Gray(12, "[INIT]").String() + " " + au.Green("RemoteAI client initialized successfully.").String())
 	}
 
 	// Check if service updated with last modify time
@@ -127,7 +127,7 @@ func main() {
 
 }
 
-func processEmails(ai *openai.OpenAIClient) {
+func processEmails(ai *remoteai.RemoteAIClient) {
 
 	log.Println("Connecting to POP3 server...")
 	startTime := time.Now()

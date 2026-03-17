@@ -1,6 +1,6 @@
 # Email2Folder
 
-A program for automatic processing of emails from a POP3 server: downloads emails, saves them into folders by sender, adds metadata, and processes them using OpenAI.
+A program for automatic processing of emails from a POP3 server: downloads emails, saves them into folders by sender, adds metadata, and processes them using RemoteAI.
 
 ---
 
@@ -11,7 +11,7 @@ A program for automatic processing of emails from a POP3 server: downloads email
 - Creates folders based on email senders
 - Saves emails and attachments to corresponding folders
 - Sets custom file attributes (xattr)
-- Generates additional information with OpenAI (analysis, tags, summary)
+- Generates additional information with RemoteAI (analysis, tags, summary)
 - Runs automatically on a schedule
 - Detects binary updates and restarts the service
 
@@ -30,7 +30,7 @@ go build
 - `Addresses` — list of email addresses to process
 - `Passwords` — paths to files containing passwords for these addresses
 - `Folder` — root directory for saving emails
-- `OpenAIToken` — OpenAI API token (optional; disables AI features if missing)
+- `RemoteAIToken` — RemoteAI API token (optional; disables AI features if missing)
 - `StartTimeSecond` — delay before the first run, in seconds
 
 ---
@@ -42,14 +42,14 @@ Parameters are defined in the `conf` package:
 - **Addresses**: a list of POP3 email addresses to fetch
 - **Passwords**: file paths with corresponding passwords
 - **Folder**: base directory to store downloaded emails
-- **OpenAIToken**: API token for OpenAI features
+- **RemoteAIToken**: API token for RemoteAI features
 - **StartTimeSecond**: scheduling delay in seconds
 
 ---
 
-## OpenAI Integration
+## RemoteAI Integration
 
-When an OpenAI token is provided, emails will be processed to:
+When an RemoteAI token is provided, emails will be processed to:
 
 - Determine email type
 - Generate a concise summary
@@ -76,7 +76,7 @@ When an OpenAI token is provided, emails will be processed to:
   - `conf` — configuration handling
   - `email` — POP3 client and email utilities
   - `file` — file operations and xattr
-  - `openai` — OpenAI API client
+  - `remoteai` — RemoteAI API client
 
 ---
 
@@ -90,7 +90,7 @@ When an OpenAI token is provided, emails will be processed to:
    - Find or create the sender folder
    - Save the `.eml` file and any attachments
    - Write custom file attributes (metadata)
-   - Call OpenAI API for tags and summary (if enabled)
+   - Call RemoteAI API for tags and summary (if enabled)
    - Delete the email from the server
 5. Wait until the next scheduled run
 6. Restart the service if the binary is updated
