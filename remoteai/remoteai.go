@@ -25,7 +25,7 @@ func NewRemoteAIClient(token string) (*RemoteAIClient, error) {
 		return nil, nil
 	}
 	log.Println(au.Gray(12, "[REMOTEAI]").String() + " " + au.Cyan("Initializing OpenRouter client...").String())
-	
+
 	config := openai.DefaultConfig(token)
 	config.BaseURL = "https://openrouter.ai/api/v1"
 	client := openai.NewClientWithConfig(config)
@@ -90,7 +90,7 @@ func (oac *RemoteAIClient) GenerateTextFromEmail(emailText string) (*EmailAnalys
 	resp, err := oac.client.CreateChatCompletion(
 		context.Background(),
 		openai.ChatCompletionRequest{
-			Model: "google/gemini-3.1-flash-lite-preview",
+			Model: "qwen/qwen3-coder",
 			Messages: []openai.ChatCompletionMessage{
 				{
 					Role:    openai.ChatMessageRoleSystem,
