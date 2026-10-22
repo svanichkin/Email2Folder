@@ -9,11 +9,13 @@ import (
 )
 
 type Config struct {
-	Addresses       string        `json:"addresses"`
-	Passwords       string        `json:"passwords"`
-	Folder          string        `json:"folder"`
-	RemoteAIToken     string        `json:"remoteai"`
-	StartTimeSecond time.Duration `json:"startTimeSecond"`
+	Addresses             string        `json:"addresses"`
+	Passwords             string        `json:"passwords"`
+	Folder                string        `json:"folder"`
+	RemoteAIToken         string        `json:"remoteai"`
+	IMAPServer            string        `json:"imapServer"`
+	IMAPProcessingMailbox string        `json:"imapProcessingMailbox"`
+	StartTimeSecond       time.Duration `json:"startTimeSecond"`
 }
 
 func GetConfigFilePath() (string, error) {

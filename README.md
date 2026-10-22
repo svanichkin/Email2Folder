@@ -1,12 +1,13 @@
 # Email2Folder
 
-A program for automatic processing of emails from a POP3 server: downloads emails, saves them into folders by sender, adds metadata, and processes them using RemoteAI.
+A program for automatic processing of emails from an IMAP server: claims emails safely across multiple machines, saves them into folders by sender, adds metadata, and processes them using RemoteAI.
 
 ---
 
 ## Features
 
-- Connects to POP3 with login and password authentication
+- Connects to IMAPS (TLS on port 993) with login and password authentication
+- Atomically moves each email from `INBOX` to a shared processing mailbox before handling it, so only one machine can claim it
 - Downloads and parses emails in .eml format
 - Creates folders based on email senders
 - Saves emails and attachments to corresponding folders
@@ -31,6 +32,8 @@ go build
 - `Passwords` — paths to files containing passwords for these addresses
 - `Folder` — root directory for saving emails
 - `RemoteAIToken` — RemoteAI API token (optional; disables AI features if missing)
+- `IMAPServer` — IMAP hostname; if omitted, the domain part of the username is used
+- `IMAPProcessingMailbox` — shared IMAP mailbox used to claim messages; defaults to `Email2Folder Processing`
 - `StartTimeSecond` — delay before the first run, in seconds
 
 ---
@@ -39,10 +42,12 @@ go build
 
 Parameters are defined in the `conf` package:
 
-- **Addresses**: a list of POP3 email addresses to fetch
+- **Addresses**: a list of IMAP email addresses to fetch
 - **Passwords**: file paths with corresponding passwords
 - **Folder**: base directory to store downloaded emails
 - **RemoteAIToken**: API token for RemoteAI features
+- **IMAPServer**: IMAP hostname, useful when it differs from the email domain
+- **IMAPProcessingMailbox**: shared mailbox; every worker must use the same value
 - **StartTimeSecond**: scheduling delay in seconds
 
 ---
@@ -74,7 +79,7 @@ When an RemoteAI token is provided, emails will be processed to:
 - [aurora](https://github.com/logrusorgru/aurora) — colored console output
 - Internal modules:
   - `conf` — configuration handling
-  - `email` — POP3 client and email utilities
+  - `email` — IMAP client and email utilities
   - `file` — file operations and xattr
   - `remoteai` — RemoteAI API client
 
@@ -84,14 +89,15 @@ When an RemoteAI token is provided, emails will be processed to:
 
 1. Load configuration
 2. Discover email addresses and passwords
-3. Connect to the POP3 server
+3. Connect to the IMAP server
 4. Fetch emails and process each:
+   - Atomically move it from `INBOX` to the processing mailbox to claim it
    - Parse headers and extract body text
    - Find or create the sender folder
    - Save the `.eml` file and any attachments
    - Write custom file attributes (metadata)
    - Call RemoteAI API for tags and summary (if enabled)
-   - Delete the email from the server
+   - Delete the claimed email from the server only after all files are saved
 5. Wait until the next scheduled run
 6. Restart the service if the binary is updated
 

@@ -1,6 +1,7 @@
 package file
 
 import (
+	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -24,7 +25,7 @@ func CleanFolderName(name string) string {
 }
 
 func CleanSubjectPrefix(name string) string {
-	
+
 	name = strings.TrimSpace(name)
 	for {
 		lower := strings.ToLower(name)
@@ -46,9 +47,21 @@ func CleanFileName(name string) string {
 	name = CleanSubjectPrefix(name)
 	name = strings.Replace(name, ":", "꞉", -1)
 	name = strings.Replace(name, "/", "∕", -1)
+	name = strings.Replace(name, "\\", "＼", -1)
 
 	return name
-	
+
+}
+
+// CleanAttachmentFileName removes all path components supplied by an email
+// sender before applying the regular filename normalization.
+func CleanAttachmentFileName(name string) string {
+	name = strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+	name = filepath.Base(name)
+	if name == "" || name == "." || name == ".." {
+		return "attachment"
+	}
+	return CleanFileName(name)
 }
 
 func SetAttributes(path string, attrs map[string]string) error {

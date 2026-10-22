@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"email2folder/conf"
 	"email2folder/email"
 	"email2folder/file"
@@ -23,7 +24,9 @@ import (
 )
 
 const (
-	timeout = 10 * time.Second
+	timeout                      = 10 * time.Second
+	imapInbox                    = "INBOX"
+	defaultIMAPProcessingMailbox = "Email2Folder Processing"
 )
 
 var serverAddr string
@@ -32,6 +35,7 @@ var password string
 var folder string
 
 var scheduleTime time.Duration
+var imapProcessingMailbox string
 
 func main() {
 
@@ -86,6 +90,13 @@ func main() {
 
 	password = p[username]
 	folder = config.Folder
+	if config.IMAPServer != "" {
+		serverAddr = config.IMAPServer
+	}
+	imapProcessingMailbox = config.IMAPProcessingMailbox
+	if imapProcessingMailbox == "" {
+		imapProcessingMailbox = defaultIMAPProcessingMailbox
+	}
 
 	// Init RemoteAI
 
@@ -129,42 +140,29 @@ func main() {
 
 func processEmails(ai *remoteai.RemoteAIClient) {
 
-	log.Println("Connecting to POP3 server...")
+	log.Println("Connecting to IMAP server...")
 	startTime := time.Now()
 
-	// Init POP3 client
+	// Init IMAP client
 
-	c, err := email.InitPop3(serverAddr, username, password, timeout)
+	c, err := email.InitIMAP(serverAddr, username, password, timeout)
 	if err != nil {
-		log.Println("Pop3 connection error:", err)
+		log.Println("IMAP connection error:", err)
 		return
 	}
-	defer c.Quit()
+	defer func() {
+		if err := c.Close(); err != nil {
+			log.Printf("IMAP close error: %v", err)
+		}
+	}()
 
-	// Get statistics
-
-	count, _, err := c.Stat()
-	if err != nil {
-		log.Println("Stat error:", err)
-		return
-	}
-	if count == 0 {
-		log.Println("No messages found")
-		return
-	}
-	log.Printf("Found %d messages, processing...", count)
-
-	// Get emails list
-
-	msgs, err := c.List(0)
-	if err != nil {
-		log.Println("List error:", err)
+	if err := c.EnsureMailbox(imapProcessingMailbox); err != nil {
+		log.Printf("Processing mailbox error: %v", err)
 		return
 	}
 
-	// Work with emails
-
-	for _, msg := range msgs {
+	processed := 0
+	for {
 
 		// Check timout
 
@@ -173,26 +171,31 @@ func processEmails(ai *remoteai.RemoteAIClient) {
 			break
 		}
 
-		// Get next mail
+		// Atomically claim the next message by moving it out of INBOX.
 
-		m, err := c.Retr(msg.ID)
+		claim, err := c.ClaimNext(imapInbox, imapProcessingMailbox)
 		if err != nil {
-			log.Printf("Retrieve error for message %d: %v", msg.ID, err)
-			continue
+			log.Printf("Claim message error: %v", err)
+			break
 		}
-		var buf bytes.Buffer
-		if err := m.WriteTo(&buf); err != nil {
-			log.Printf("Read error for message %d: %v", msg.ID, err)
-			continue
+		if claim == nil {
+			break
 		}
-		msgData := buf.Bytes()
+
+		msgData, err := c.FetchClaimedRaw(imapProcessingMailbox, claim.UID)
+		if err != nil {
+			log.Printf("Retrieve error for message %d: %v", claim.UID, err)
+			releaseClaim(c, claim)
+			break
+		}
 
 		// Parse headers
 
 		header, err := email.ExtractHeader(msgData)
 		if err != nil {
 			log.Printf("Parse headers error: %v", err)
-			continue
+			releaseClaim(c, claim)
+			break
 		}
 
 		// Get attributes
@@ -200,15 +203,25 @@ func processEmails(ai *remoteai.RemoteAIClient) {
 		attrs, err := initFileAttributes(header, msgData)
 		if err != nil {
 			log.Printf("Attributes error: %v", err)
-			continue
+			releaseClaim(c, claim)
+			break
 		}
 
 		// Openai attributwes
 
-		res, err := ai.GenerateTextFromEmail(attrs["markdown"])
+		remaining := timeout - time.Since(startTime)
+		if remaining <= 0 {
+			log.Println("Timeout reached, stopping processing")
+			releaseClaim(c, claim)
+			break
+		}
+		aiCtx, cancel := context.WithTimeout(context.Background(), remaining)
+		res, err := ai.GenerateTextFromEmail(aiCtx, attrs["markdown"])
+		cancel()
 		if err != nil {
 			log.Printf("Openai attributes error: %v", err)
-			continue
+			releaseClaim(c, claim)
+			break
 		}
 		attrs["type"] = string(res.Type)
 		attrs["summary"] = string(res.Summary)
@@ -219,60 +232,78 @@ func processEmails(ai *remoteai.RemoteAIClient) {
 
 		// Find and create folder
 
-		fromAddresses := email.ExtractAddresses(header, "From")
+		fromAddresses := email.ExtractFrom(header)
 		folderPath, err := findOrCreateFolderAttrFrom(fromAddresses)
 		if err != nil {
 			log.Printf("Folder error: %v", err)
-			continue
+			releaseClaim(c, claim)
+			break
 		}
 
-		// Safity filename
-
-		s, _ := header.Subject()
-		d := email.ExtractDate(header).Format("2006-01-02 15꞉04")
-		filename := file.TrimFilenameToMaxBytes(fmt.Sprintf("%s %s.eml", d, file.CleanFileName(s)), 254)
-
-		// Folder created in findOrCreateFolder
-
-		filePath := filepath.Join(folderPath, filename)
-
-		// Create .eml
-
-		if err := os.WriteFile(filePath, msgData, 0644); err != nil {
-			log.Printf("Write file error: %v", err)
-			continue
+		if err := saveMessage(folderPath, header, msgData, attrs); err != nil {
+			log.Printf("Save message error: %v", err)
+			releaseClaim(c, claim)
+			break
 		}
 
-		// Set xattr for .eml
+		// Delete only after the complete message was stored successfully.
 
-		if err := file.SetAttributes(filePath, attrs); err != nil {
-			log.Printf("Set attributes error: %v", err)
+		if err := c.DeleteClaimed(claim.UID); err != nil {
+			log.Printf("Delete error for message %d: %v", claim.UID, err)
+			releaseClaim(c, claim)
+			break
 		}
-
-		env, err := enmime.ReadEnvelope(bytes.NewReader(msgData))
-		if err != nil {
-			log.Printf("Parse MIME error: %v", err)
-		} else {
-			for _, att := range env.Attachments {
-				attPath := filepath.Join(folderPath, file.TrimFilenameToMaxBytes(d+" "+att.FileName, 254))
-				if err := os.WriteFile(attPath, att.Content, 0644); err != nil {
-					log.Printf("Save attachment error: %v", err)
-				}
-			}
-		}
-
-		// Delete email from server
-
-		if err := c.Dele(msg.ID); err != nil {
-			log.Printf("Delete error: %v", err)
-		}
-		log.Printf("Processed message %d from %s", msg.ID, fromAddresses[0])
+		processed++
+		log.Printf("Processed message %d from %s", claim.UID, fromAddresses[0])
 	}
+	if processed == 0 {
+		log.Println("No messages processed")
+	}
+
+}
+
+func releaseClaim(c *email.IMAPClient, claim *email.ClaimedMessage) {
+
+	if err := c.ReleaseClaim(imapInbox, claim.UID); err != nil {
+		log.Printf("Release message %d error: %v", claim.UID, err)
+	}
+
+}
+
+func saveMessage(folderPath string, header mail.Header, msgData []byte, attrs map[string]string) error {
+
+	subject, _ := header.Subject()
+	date := email.ExtractDate(header).Format("2006-01-02 15꞉04")
+	filename := file.TrimFilenameToMaxBytes(fmt.Sprintf("%s %s.eml", date, file.CleanFileName(subject)), 254)
+	filePath := filepath.Join(folderPath, filename)
+	if err := os.WriteFile(filePath, msgData, 0644); err != nil {
+		return fmt.Errorf("write .eml: %w", err)
+	}
+	if err := file.SetAttributes(filePath, attrs); err != nil {
+		return fmt.Errorf("set attributes: %w", err)
+	}
+
+	env, err := enmime.ReadEnvelope(bytes.NewReader(msgData))
+	if err != nil {
+		return fmt.Errorf("parse MIME: %w", err)
+	}
+	for _, att := range env.Attachments {
+		attachmentName := file.CleanAttachmentFileName(att.FileName)
+		attachmentPath := filepath.Join(folderPath, file.TrimFilenameToMaxBytes(date+" "+attachmentName, 254))
+		if err := os.WriteFile(attachmentPath, att.Content, 0644); err != nil {
+			return fmt.Errorf("save attachment %q: %w", attachmentName, err)
+		}
+	}
+
+	return nil
 
 }
 
 func findOrCreateFolderAttrFrom(fromAddresses []string) (string, error) {
 
+	if len(fromAddresses) == 0 {
+		return "", fmt.Errorf("no From address in message")
+	}
 	fromKey := strings.Join(fromAddresses, ",")
 
 	// Find folder wtih xattr from
@@ -309,7 +340,7 @@ func initFileAttributes(header mail.Header, data []byte) (map[string]string, err
 	}
 
 	return map[string]string{
-		"from":        strings.Join(email.ExtractAddresses(header, "From"), ","),
+		"from":        strings.Join(email.ExtractFrom(header), ","),
 		"to":          strings.Join(email.ExtractAddresses(header, "To"), ","),
 		"markdown":    md,
 		"date":        fmt.Sprintf("%d", email.ExtractDate(header).Unix()),

@@ -77,7 +77,7 @@ type EmailAnalysisResult struct {
 	Tags        string    `json:"tags"`
 }
 
-func (oac *RemoteAIClient) GenerateTextFromEmail(emailText string) (*EmailAnalysisResult, error) {
+func (oac *RemoteAIClient) GenerateTextFromEmail(ctx context.Context, emailText string) (*EmailAnalysisResult, error) {
 
 	if oac.client == nil {
 		return nil, errors.New("RemoteAI client not initialized")
@@ -87,8 +87,11 @@ func (oac *RemoteAIClient) GenerateTextFromEmail(emailText string) (*EmailAnalys
 	}
 
 	log.Println(au.Gray(12, "[REMOTEAI]").String() + " " + au.Magenta("Analyzing email content with OpenRouter...").String())
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	resp, err := oac.client.CreateChatCompletion(
-		context.Background(),
+		ctx,
 		openai.ChatCompletionRequest{
 			Model: "qwen/qwen3-coder",
 			Messages: []openai.ChatCompletionMessage{

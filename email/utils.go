@@ -11,6 +11,7 @@ import (
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/emersion/go-message"
+	_ "github.com/emersion/go-message/charset"
 	"github.com/emersion/go-message/mail"
 	telehtml "github.com/svanichkin/TelegramHTML"
 )
@@ -19,7 +20,7 @@ func ExtractHeader(data []byte) (mail.Header, error) {
 
 	r := bytes.NewReader(data)
 	msg, err := message.Read(r)
-	if err != nil {
+	if err != nil && !message.IsUnknownCharset(err) {
 		return mail.Header{}, fmt.Errorf("failed to read message: %w", err)
 	}
 
@@ -30,7 +31,7 @@ func ExtractHeader(data []byte) (mail.Header, error) {
 func HasAttachments(data []byte) bool {
 
 	msg, err := message.Read(bytes.NewReader(data))
-	if err != nil {
+	if err != nil && !message.IsUnknownCharset(err) {
 		return false
 	}
 	mt, _, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
@@ -78,6 +79,31 @@ func ExtractAddresses(header mail.Header, field string) []string {
 	return result
 }
 
+func ExtractFrom(header mail.Header) []string {
+
+	if addrs := ExtractAddresses(header, "From"); len(addrs) > 0 {
+		return addrs
+	}
+
+	// Some gateways (SMS, fax) put a non email value in From,
+	// so look for a real address in the fallback fields
+
+	for _, field := range []string{"Sender", "Reply-To", "Return-Path", "X-Original-From"} {
+		if addrs := ExtractAddresses(header, field); len(addrs) > 0 {
+			return addrs
+		}
+	}
+
+	// Nothing looks like an address, keep the raw From as an identifier
+
+	if raw := strings.TrimSpace(strings.Trim(strings.TrimSpace(header.Get("From")), "<>")); raw != "" {
+		return []string{raw}
+	}
+
+	return nil
+
+}
+
 func removeDoubles(input []string) []string {
 	seen := make(map[string]struct{})
 	result := make([]string, 0, len(input))
@@ -118,7 +144,7 @@ func ExtractText(header mail.Header, data []byte) (string, error) {
 	var html, plain strings.Builder
 
 	msg, err := message.Read(bytes.NewReader(data))
-	if err != nil {
+	if err != nil && !message.IsUnknownCharset(err) {
 		return "", err
 	}
 
