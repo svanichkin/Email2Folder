@@ -12,9 +12,10 @@ A program for automatic processing of emails from an IMAP server: claims emails 
 - Creates folders based on email senders
 - Saves emails and attachments to corresponding folders
 - Sets custom file attributes (xattr)
-- Generates additional information with RemoteAI (analysis, tags, summary)
-- Runs automatically on a schedule
-- Detects binary updates and restarts the service
+- Classifies each email with DeepSeek V4.1 Flash using its complete original `.eml` source
+- Generates Russian Markdown and metadata with DeepSeek V4.1 Flash via OpenRouter (summary, tags, unsubscribe link)
+- Holds an IMAP `IDLE` connection and processes new mail immediately
+- Reconnects automatically after an IMAP error
 
 ---
 
@@ -33,8 +34,7 @@ go build
 - `Folder` — root directory for saving emails
 - `RemoteAIToken` — RemoteAI API token (optional; disables AI features if missing)
 - `IMAPServer` — IMAP hostname; if omitted, the domain part of the username is used
-- `IMAPProcessingMailbox` — shared IMAP mailbox used to claim messages; defaults to `Email2Folder Processing`
-- `StartTimeSecond` — delay before the first run, in seconds
+- `IMAPProcessingMailbox` — shared IMAP mailbox used to claim messages; when omitted, the service creates `Email2Folder Processing` inside the account's personal IMAP namespace (for example `INBOX.Email2Folder Processing`)
 
 ---
 
@@ -47,19 +47,19 @@ Parameters are defined in the `conf` package:
 - **Folder**: base directory to store downloaded emails
 - **RemoteAIToken**: API token for RemoteAI features
 - **IMAPServer**: IMAP hostname, useful when it differs from the email domain
-- **IMAPProcessingMailbox**: shared mailbox; every worker must use the same value
-- **StartTimeSecond**: scheduling delay in seconds
+- **IMAPProcessingMailbox**: shared mailbox; every worker must use the same value. Leave it empty to use the account's personal IMAP namespace automatically.
 
 ---
 
 ## RemoteAI Integration
 
-When an RemoteAI token is provided, emails will be processed to:
+When an OpenRouter token is provided, emails will be processed to:
 
-- Determine email type
-- Generate a concise summary
-- Extract relevant tags
-- Identify unsubscribe links if available
+- Determine the email type with `deepseek/deepseek-v4.1-flash`. DeepSeek receives the complete original raw RFC 5322/MIME `.eml`, including headers and MIME structure.
+- Generate a clean Russian Markdown representation from the raw EML
+- Generate a concise summary, relevant tags, and an unsubscribe link where available
+
+DeepSeek performs classification, Russian Markdown generation, and metadata extraction in one bounded request. The email is saved and deleted from IMAP only after this complete JSON response has been parsed and validated. DeepSeek reasoning is disabled so the completion budget is reserved for the requested JSON.
 
 ---
 
@@ -96,17 +96,18 @@ When an RemoteAI token is provided, emails will be processed to:
    - Find or create the sender folder
    - Save the `.eml` file and any attachments
    - Write custom file attributes (metadata)
-   - Call RemoteAI API for tags and summary (if enabled)
+   - Send the complete raw `.eml` to DeepSeek once for classification, Russian Markdown, and metadata (if enabled)
    - Delete the claimed email from the server only after all files are saved
-5. Wait until the next scheduled run
-6. Restart the service if the binary is updated
+5. Enter IMAP `IDLE` and wait for a new-message notification
+6. Process newly arrived messages immediately; reconnect after an IMAP error
 
 ---
 
-## Timeouts and Scheduling
+## Timeouts and IDLE
 
-- Default connection and processing timeout: **10 seconds**
-- Scheduling interval: defined by **StartTimeSecond** (seconds)
+- Connection setup timeout: **10 seconds**
+- Each DeepSeek request has a **45-second** deadline
+- The service stays in IMAP `IDLE`; it refreshes the IDLE command every 29 minutes and reconnects after IMAP errors
 
 ---
 

@@ -34,7 +34,6 @@ require (
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/logrusorgru/aurora/v4 v4.0.0
 	github.com/pkg/xattr v0.4.12
-	github.com/sashabaranov/go-openai v1.40.3
 	github.com/svanichkin/TelegramHTML v1.1.0
 	golang.org/x/text v0.25.0 // indirect
 )

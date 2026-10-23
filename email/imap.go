@@ -16,7 +16,9 @@ import (
 // processing mailbox. Only the worker that receives the destination UID uses
 // that claim, so concurrent workers never process the same message.
 type IMAPClient struct {
-	client *imapclient.Client
+	client         *imapclient.Client
+	personalPrefix string
+	mailboxUpdates chan struct{}
 }
 
 // ClaimedMessage identifies a message after it was moved to the processing
@@ -44,8 +46,25 @@ func InitIMAP(serverAddr, username, password string, timeout time.Duration) (*IM
 		rawConn.Close()
 		return nil, err
 	}
+	if err := tlsConn.SetDeadline(time.Time{}); err != nil {
+		tlsConn.Close()
+		return nil, err
+	}
 
-	client := imapclient.New(&deadlineConn{Conn: tlsConn, timeout: timeout}, nil)
+	mailboxUpdates := make(chan struct{}, 1)
+	client := imapclient.New(tlsConn, &imapclient.Options{
+		UnilateralDataHandler: &imapclient.UnilateralDataHandler{
+			Mailbox: func(data *imapclient.UnilateralDataMailbox) {
+				if data.NumMessages == nil {
+					return
+				}
+				select {
+				case mailboxUpdates <- struct{}{}:
+				default:
+				}
+			},
+		},
+	})
 	if err := client.WaitGreeting(); err != nil {
 		client.Close()
 		return nil, err
@@ -60,10 +79,73 @@ func InitIMAP(serverAddr, username, password string, timeout time.Duration) (*IM
 		return nil, errors.New("IMAP server must support MOVE and UIDPLUS for safe multi-machine processing")
 	}
 
-	return &IMAPClient{client: client}, nil
+	result := &IMAPClient{client: client, mailboxUpdates: mailboxUpdates}
+	if caps.Has(imap.CapNamespace) {
+		namespace, err := client.Namespace().Wait()
+		if err != nil {
+			client.Close()
+			return nil, fmt.Errorf("query IMAP namespace: %w", err)
+		}
+		if len(namespace.Personal) > 0 {
+			result.personalPrefix = namespace.Personal[0].Prefix
+		}
+	}
+
+	return result, nil
 }
 
-// EnsureMailbox creates a top-level processing mailbox if it doesn't exist.
+// WaitForInboxChange selects INBOX and waits in IDLE mode until the server
+// reports a message-count change or ctx expires. The caller must process all
+// currently available messages before calling this method.
+func (c *IMAPClient) WaitForInboxChange(ctx context.Context, inbox string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		select {
+		case <-c.mailboxUpdates:
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	if _, err := c.client.Select(inbox, nil).Wait(); err != nil {
+		return fmt.Errorf("select inbox for IDLE: %w", err)
+	}
+	if mailbox := c.client.Mailbox(); mailbox != nil && mailbox.NumMessages > 0 {
+		return nil
+	}
+
+	idle, err := c.client.Idle()
+	if err != nil {
+		return fmt.Errorf("start IMAP IDLE: %w", err)
+	}
+	var waitErr error
+	select {
+	case <-c.mailboxUpdates:
+	case <-ctx.Done():
+		waitErr = ctx.Err()
+	}
+	if err := idle.Close(); err != nil {
+		return fmt.Errorf("stop IMAP IDLE: %w", err)
+	}
+	if err := idle.Wait(); err != nil {
+		return fmt.Errorf("wait for IMAP IDLE: %w", err)
+	}
+	return waitErr
+}
+
+// DefaultMailboxName places a service mailbox in the account's personal IMAP
+// namespace. Some servers reject root-level names and require e.g. INBOX.foo.
+func (c *IMAPClient) DefaultMailboxName(name string) string {
+	if c.personalPrefix == "" {
+		return name
+	}
+	return c.personalPrefix + name
+}
+
+// EnsureMailbox creates the configured processing mailbox if it doesn't exist.
 func (c *IMAPClient) EnsureMailbox(mailbox string) error {
 	if _, err := c.client.Select(mailbox, nil).Wait(); err == nil {
 		return nil
@@ -172,25 +254,4 @@ func (c *IMAPClient) ReleaseClaim(inbox string, uid imap.UID) error {
 
 func (c *IMAPClient) Close() error {
 	return c.client.Close()
-}
-
-// deadlineConn keeps the IMAP library's per-operation deadlines bounded by
-// the service timeout, including long literal reads.
-type deadlineConn struct {
-	net.Conn
-	timeout time.Duration
-}
-
-func (c *deadlineConn) Read(p []byte) (int, error) {
-	if err := c.Conn.SetDeadline(time.Now().Add(c.timeout)); err != nil {
-		return 0, err
-	}
-	return c.Conn.Read(p)
-}
-
-func (c *deadlineConn) Write(p []byte) (int, error) {
-	if err := c.Conn.SetDeadline(time.Now().Add(c.timeout)); err != nil {
-		return 0, err
-	}
-	return c.Conn.Write(p)
 }

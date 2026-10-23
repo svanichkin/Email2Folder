@@ -6,9 +6,9 @@ import (
 	"email2folder/email"
 	"email2folder/file"
 	"email2folder/remoteai"
-	"os/exec"
 
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 
@@ -24,7 +24,10 @@ import (
 )
 
 const (
-	timeout                      = 10 * time.Second
+	connectionTimeout            = 10 * time.Second
+	aiRequestTimeout             = 45 * time.Second
+	idleRefreshInterval          = 29 * time.Minute
+	reconnectDelay               = 5 * time.Second
 	imapInbox                    = "INBOX"
 	defaultIMAPProcessingMailbox = "Email2Folder Processing"
 )
@@ -34,7 +37,6 @@ var username string
 var password string
 var folder string
 
-var scheduleTime time.Duration
 var imapProcessingMailbox string
 
 func main() {
@@ -45,10 +47,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize config: %v", err)
 	}
-
-	// Start cycle every config.StartTimeSecond one time in minute
-
-	scheduleTime = config.StartTimeSecond * time.Second
 
 	// Find all email addresses
 
@@ -94,9 +92,6 @@ func main() {
 		serverAddr = config.IMAPServer
 	}
 	imapProcessingMailbox = config.IMAPProcessingMailbox
-	if imapProcessingMailbox == "" {
-		imapProcessingMailbox = defaultIMAPProcessingMailbox
-	}
 
 	// Init RemoteAI
 
@@ -110,73 +105,67 @@ func main() {
 		log.Println(au.Gray(12, "[INIT]").String() + " " + au.Green("RemoteAI client initialized successfully.").String())
 	}
 
-	// Check if service updated with last modify time
-
-	exePath, _ := os.Executable()
-	info, _ := os.Stat(exePath)
-	lastModTime := info.ModTime()
-
-	// Main cycle
-
-	for {
-		now := time.Now()
-		nextRun := now.Truncate(time.Minute).Add(time.Minute).Add(scheduleTime)
-		sleepDuration := nextRun.Sub(now)
-		log.Printf("Next run at %s (in %v)", nextRun.Format("15:04:05"), sleepDuration.Round(time.Second))
-		time.Sleep(sleepDuration)
-		processEmails(ai)
-		info, err := os.Stat(exePath)
-		if err != nil {
-			continue
-		}
-		if info.ModTime() != lastModTime {
-			fmt.Println("Binary updated, stop service...")
-			exec.Command(exePath).Start()
-			os.Exit(0)
-		}
-	}
-
+	runIMAPIdleLoop(ai)
 }
 
-func processEmails(ai *remoteai.RemoteAIClient) {
-
-	log.Println("Connecting to IMAP server...")
-	startTime := time.Now()
-
-	// Init IMAP client
-
-	c, err := email.InitIMAP(serverAddr, username, password, timeout)
-	if err != nil {
-		log.Println("IMAP connection error:", err)
-		return
-	}
-	defer func() {
-		if err := c.Close(); err != nil {
-			log.Printf("IMAP close error: %v", err)
-		}
-	}()
-
-	if err := c.EnsureMailbox(imapProcessingMailbox); err != nil {
-		log.Printf("Processing mailbox error: %v", err)
-		return
-	}
-
-	processed := 0
+func runIMAPIdleLoop(ai *remoteai.RemoteAIClient) {
 	for {
+		log.Println("Connecting to IMAP server...")
+		c, err := email.InitIMAP(serverAddr, username, password, connectionTimeout)
+		if err != nil {
+			log.Printf("IMAP connection error: %v; reconnecting in %v", err, reconnectDelay)
+			time.Sleep(reconnectDelay)
+			continue
+		}
+		if imapProcessingMailbox == "" {
+			imapProcessingMailbox = c.DefaultMailboxName(defaultIMAPProcessingMailbox)
+			log.Printf("Using default processing mailbox %q", imapProcessingMailbox)
+		}
+		if err := c.EnsureMailbox(imapProcessingMailbox); err != nil {
+			log.Printf("Processing mailbox error: %v", err)
+			_ = c.Close()
+			time.Sleep(reconnectDelay)
+			continue
+		}
 
-		// Check timout
+		for {
+			if err := processEmails(c, ai); err != nil {
+				log.Printf("Email processing error: %v", err)
+				break
+			}
 
-		if time.Since(startTime) > timeout {
-			log.Println("Timeout reached, stopping processing")
+			idleCtx, cancel := context.WithTimeout(context.Background(), idleRefreshInterval)
+			err := c.WaitForInboxChange(idleCtx, imapInbox)
+			cancel()
+			if err == nil {
+				log.Println("IMAP IDLE received a mailbox update")
+				continue
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Println("Refreshing IMAP IDLE connection")
+				continue
+			}
+			log.Printf("IMAP IDLE error: %v", err)
 			break
 		}
 
+		if err := c.Close(); err != nil {
+			log.Printf("IMAP close error: %v", err)
+		}
+		log.Printf("Reconnecting to IMAP in %v", reconnectDelay)
+		time.Sleep(reconnectDelay)
+	}
+}
+
+func processEmails(c *email.IMAPClient, ai *remoteai.RemoteAIClient) error {
+
+	processed := 0
+	for {
 		// Atomically claim the next message by moving it out of INBOX.
 
 		claim, err := c.ClaimNext(imapInbox, imapProcessingMailbox)
 		if err != nil {
-			log.Printf("Claim message error: %v", err)
-			break
+			return fmt.Errorf("claim message: %w", err)
 		}
 		if claim == nil {
 			break
@@ -184,46 +173,38 @@ func processEmails(ai *remoteai.RemoteAIClient) {
 
 		msgData, err := c.FetchClaimedRaw(imapProcessingMailbox, claim.UID)
 		if err != nil {
-			log.Printf("Retrieve error for message %d: %v", claim.UID, err)
 			releaseClaim(c, claim)
-			break
+			return fmt.Errorf("retrieve message %d: %w", claim.UID, err)
 		}
 
 		// Parse headers
 
 		header, err := email.ExtractHeader(msgData)
 		if err != nil {
-			log.Printf("Parse headers error: %v", err)
 			releaseClaim(c, claim)
-			break
+			return fmt.Errorf("parse headers for message %d: %w", claim.UID, err)
 		}
 
 		// Get attributes
 
 		attrs, err := initFileAttributes(header, msgData)
 		if err != nil {
-			log.Printf("Attributes error: %v", err)
 			releaseClaim(c, claim)
-			break
+			return fmt.Errorf("build attributes for message %d: %w", claim.UID, err)
 		}
 
-		// Openai attributwes
+		// DeepSeek receives the original RFC 5322/MIME email once and returns
+		// its type, Russian Markdown, and all metadata in one JSON response.
 
-		remaining := timeout - time.Since(startTime)
-		if remaining <= 0 {
-			log.Println("Timeout reached, stopping processing")
-			releaseClaim(c, claim)
-			break
-		}
-		aiCtx, cancel := context.WithTimeout(context.Background(), remaining)
-		res, err := ai.GenerateTextFromEmail(aiCtx, attrs["markdown"])
+		aiCtx, cancel := context.WithTimeout(context.Background(), aiRequestTimeout)
+		res, err := ai.AnalyzeRawEmail(aiCtx, msgData)
 		cancel()
 		if err != nil {
-			log.Printf("Openai attributes error: %v", err)
 			releaseClaim(c, claim)
-			break
+			return fmt.Errorf("DeepSeek analysis for message %d: %w", claim.UID, err)
 		}
 		attrs["type"] = string(res.Type)
+		attrs["markdown"] = res.Markdown
 		attrs["summary"] = string(res.Summary)
 		if len(attrs["unsubscribe"]) == 0 {
 			attrs["unsubscribe"] = string(res.Unsubscribe)
@@ -235,31 +216,28 @@ func processEmails(ai *remoteai.RemoteAIClient) {
 		fromAddresses := email.ExtractFrom(header)
 		folderPath, err := findOrCreateFolderAttrFrom(fromAddresses)
 		if err != nil {
-			log.Printf("Folder error: %v", err)
 			releaseClaim(c, claim)
-			break
+			return fmt.Errorf("folder for message %d: %w", claim.UID, err)
 		}
 
 		if err := saveMessage(folderPath, header, msgData, attrs); err != nil {
-			log.Printf("Save message error: %v", err)
 			releaseClaim(c, claim)
-			break
+			return fmt.Errorf("save message %d: %w", claim.UID, err)
 		}
 
 		// Delete only after the complete message was stored successfully.
 
 		if err := c.DeleteClaimed(claim.UID); err != nil {
-			log.Printf("Delete error for message %d: %v", claim.UID, err)
 			releaseClaim(c, claim)
-			break
+			return fmt.Errorf("delete message %d: %w", claim.UID, err)
 		}
 		processed++
 		log.Printf("Processed message %d from %s", claim.UID, fromAddresses[0])
 	}
 	if processed == 0 {
-		log.Println("No messages processed")
+		log.Println("INBOX is empty; waiting in IMAP IDLE")
 	}
-
+	return nil
 }
 
 func releaseClaim(c *email.IMAPClient, claim *email.ClaimedMessage) {

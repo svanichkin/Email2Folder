@@ -17,3 +17,17 @@ func TestWholeMessageBodyAcceptsServerResponseToBodyPeek(t *testing.T) {
 		t.Fatalf("wholeMessageBody() = %q, want original MIME bytes", got)
 	}
 }
+
+func TestDefaultMailboxNameUsesPersonalNamespacePrefix(t *testing.T) {
+	client := &IMAPClient{personalPrefix: "INBOX."}
+	if got, want := client.DefaultMailboxName("Email2Folder Processing"), "INBOX.Email2Folder Processing"; got != want {
+		t.Fatalf("DefaultMailboxName() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultMailboxNameFallsBackToRoot(t *testing.T) {
+	client := &IMAPClient{}
+	if got, want := client.DefaultMailboxName("Email2Folder Processing"), "Email2Folder Processing"; got != want {
+		t.Fatalf("DefaultMailboxName() = %q, want %q", got, want)
+	}
+}
