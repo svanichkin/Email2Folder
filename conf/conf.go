@@ -1,21 +1,50 @@
 package conf
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
+	"strings"
 )
 
 type Config struct {
-	Addresses             string        `json:"addresses"`
-	Passwords             string        `json:"passwords"`
-	Folder                string        `json:"folder"`
-	RemoteAIToken         string        `json:"remoteai"`
-	IMAPServer            string        `json:"imapServer"`
-	IMAPProcessingMailbox string        `json:"imapProcessingMailbox"`
-	StartTimeSecond       time.Duration `json:"startTimeSecond"`
+	Addresses             string `json:"addresses"`
+	Passwords             string `json:"passwords"`
+	Keys                  string `json:"keys"`
+	Folder                string `json:"folder"`
+	RemoteAIToken         string `json:"remoteai"`
+	IMAPServer            string `json:"imapServer"`
+	IMAPProcessingMailbox string `json:"imapProcessingMailbox"`
+}
+
+// RemoteAITokenValue returns the configured token. When Keys is set, RemoteAIToken
+// is treated as a filename in that directory, keeping the token out of config.json.
+func (c Config) RemoteAITokenValue() (string, error) {
+	if c.RemoteAIToken == "" || c.Keys == "" {
+		return c.RemoteAIToken, nil
+	}
+
+	keyFile := filepath.Join(c.Keys, c.RemoteAIToken)
+	file, err := os.Open(keyFile)
+	if err != nil {
+		return "", fmt.Errorf("read RemoteAI key file %q: %w", keyFile, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", fmt.Errorf("read RemoteAI key file %q: %w", keyFile, err)
+		}
+		return "", fmt.Errorf("RemoteAI key file %q is empty", keyFile)
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("read RemoteAI key file %q: %w", keyFile, err)
+	}
+
+	return strings.TrimSpace(scanner.Text()), nil
 }
 
 func GetConfigFilePath() (string, error) {

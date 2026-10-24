@@ -96,7 +96,11 @@ func main() {
 	// Init RemoteAI
 
 	var ai *remoteai.RemoteAIClient
-	ai, err = remoteai.NewRemoteAIClient(config.RemoteAIToken)
+	remoteAIToken, err := config.RemoteAITokenValue()
+	if err != nil {
+		log.Fatalf(au.Gray(12, "[INIT]").String()+" "+au.Yellow("Failed to load RemoteAI token: %v").String(), err)
+	}
+	ai, err = remoteai.NewRemoteAIClient(remoteAIToken)
 	if err != nil {
 		log.Fatalf(au.Gray(12, "[INIT]").String()+" "+au.Yellow(au.Bold("Warning: Failed to initialize RemoteAI client: %v. RemoteAI features will be disabled.")).String(), err)
 	} else if ai == nil {

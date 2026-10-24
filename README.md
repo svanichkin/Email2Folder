@@ -31,8 +31,9 @@ go build
 
 - `Addresses` — list of email addresses to process
 - `Passwords` — paths to files containing passwords for these addresses
+- `Keys` — directory containing secret key files
 - `Folder` — root directory for saving emails
-- `RemoteAIToken` — RemoteAI API token (optional; disables AI features if missing)
+- `RemoteAIToken` — RemoteAI token filename inside `Keys` (for example, `remoteai`); when `Keys` is omitted, the value itself is used for backwards compatibility
 - `IMAPServer` — IMAP hostname; if omitted, the domain part of the username is used
 - `IMAPProcessingMailbox` — shared IMAP mailbox used to claim messages; when omitted, the service creates `Email2Folder Processing` inside the account's personal IMAP namespace (for example `INBOX.Email2Folder Processing`)
 
@@ -44,8 +45,9 @@ Parameters are defined in the `conf` package:
 
 - **Addresses**: a list of IMAP email addresses to fetch
 - **Passwords**: file paths with corresponding passwords
+- **Keys**: directory with secret key files
 - **Folder**: base directory to store downloaded emails
-- **RemoteAIToken**: API token for RemoteAI features
+- **RemoteAIToken**: API token filename in `Keys`, or the token itself if `Keys` is unset
 - **IMAPServer**: IMAP hostname, useful when it differs from the email domain
 - **IMAPProcessingMailbox**: shared mailbox; every worker must use the same value. Leave it empty to use the account's personal IMAP namespace automatically.
 
